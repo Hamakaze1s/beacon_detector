@@ -21,41 +21,30 @@ workflows:
 
           export PATH="$FLUTTER_DIR/bin:$PATH"
           flutter --version
-          flutter pub get
-          flutter precache --ios
 
+          # Clean everything pod-related to avoid stale lock files
           cd ios
-          pod install
-
-          echo "=== xcodebuild ==="
-          xcodebuild \
-            -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Debug \
-            -sdk iphoneos \
-            -derivedDataPath ../build/ios \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
-
-          echo "=== Build output tree ==="
-          find build/ios -type d -name "*.app" || echo "No .app found"
-
+          rm -rf Pods Podfile.lock build
           cd ..
+
+          flutter pub get
+          flutter build ios --debug --no-codesign
+
+          echo "=== Build output ==="
+          ls -la build/ios/iphoneos/ | head -20
       - name: Package IPA
         script: |
           set -e
-          APP_PATH=$(find build/ios -name "Runner.app" -type d | head -1)
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: Runner.app not found!"
-            find build/ios -type f | head -30
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: $APP_PATH not found!"
+            find build/ios -type d -name "*.app" || true
             exit 1
           fi
-          echo "Found app at: $APP_PATH"
-          ls -la "$APP_PATH" | head -20
+          echo "App size: $(du -sh "$APP_PATH")"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -qr UnsignedApp.ipa Payload
-          echo "IPA created: $(pwd)/UnsignedApp.ipa ($(wc -c < UnsignedApp.ipa) bytes)"
+          echo "IPA created: $(pwd)/UnsignedApp.ipa ($(du -h UnsignedApp.ipa | cut -f1))"
     artifacts:
       - UnsignedApp.ipa
