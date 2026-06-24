@@ -1,20 +1,42 @@
 workflows:
   ios-unsigned-build:
     name: iOS Unsigned Build
-    max_build_duration: 60
+    max_build_duration: 30
+    instance_type: mac_mini_m1
     environment:
-      flutter: stable
       xcode: latest
     scripts:
-      - name: Install dependencies
-        script: flutter pub get
-      - name: Build iOS app (unsigned)
-        script: flutter build ios --debug --no-codesign
-      - name: Package into IPA
+      - name: Setup Flutter and build
         script: |
-          APP_PATH="build/ios/iphoneos/Runner.app"
+          # Try pre-installed Flutter, fallback to download
+          FLUTTER_PATHS=(
+            "$HOME/programs/flutter/bin"
+            "/usr/local/share/flutter/bin"
+            "$HOME/flutter/bin"
+          )
+          FOUND=false
+          for p in "${FLUTTER_PATHS[@]}"; do
+            if [ -f "$p/flutter" ]; then
+              export PATH="$p:$PATH"
+              FOUND=true
+              break
+            fi
+          done
+          if [ "$FOUND" = false ]; then
+            echo "Downloading Flutter..."
+            git clone --depth 1 -b stable https://github.com/flutter/flutter.git "$HOME/flutter"
+            export PATH="$HOME/flutter/bin:$PATH"
+          fi
+
+          flutter --version
+          flutter pub get
+          flutter build ios --debug --no-codesign
+      - name: Package IPA
+        script: |
+          cd build/ios/iphoneos
           mkdir -p Payload
-          cp -r "$APP_PATH" Payload/
+          cp -r Runner.app Payload/
           zip -qr UnsignedApp.ipa Payload
+          echo "IPA created: $(pwd)/UnsignedApp.ipa ($(wc -c < UnsignedApp.ipa) bytes)"
     artifacts:
-      - UnsignedApp.ipa
+      - build/ios/iphoneos/UnsignedApp.ipa
