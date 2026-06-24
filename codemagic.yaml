@@ -1,0 +1,15 @@
+workflows:
+  ios-build:
+    name: iOS Build
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: com.example.beaconDetector
+    scripts:
+      - flutter pub get
+      - flutter build ios --debug --no-codesign
+    artifacts:
+      - build/ios/iphoneos/Runner.app
