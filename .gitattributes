@@ -1,0 +1,8 @@
+# Force LF line endings for files consumed by macOS/Xcode
+*.pbxproj text eol=lf
+*.xcscheme text eol=lf
+*.xcconfig text eol=lf
+*.xcworkspacedata text eol=lf
+*.plist text eol=lf
+*.swift text eol=lf
+Podfile text eol=lf
