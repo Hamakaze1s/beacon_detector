@@ -1,7 +1,5 @@
-# Uncomment this line to define a global platform for your project
-platform :ios, '16.0'
+platform :ios, '13.0'
 
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
@@ -16,7 +14,7 @@ def flutter_root
     generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
   end
   unless File.exist?(generated_xcode_build_settings_path)
-    raise "#{generated_xcode_build_settings_path} must exist. If using pod gen, add the `--podspec` flag."
+    raise "#{generated_xcode_build_settings_path} must exist."
   end
 
   File.foreach(generated_xcode_build_settings_path) do |line|
@@ -41,11 +39,7 @@ target 'Runner' do
 end
 
 post_install do |installer|
-  flutter_additional_ios_build_settings(installer)
-
   installer.pods_project.targets.each do |target|
-    target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
-    end
+    flutter_additional_ios_build_settings(target)
   end
 end
