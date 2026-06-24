@@ -8,26 +8,16 @@ workflows:
     scripts:
       - name: Setup Flutter and build
         script: |
-          # Try pre-installed Flutter, fallback to download
-          FLUTTER_PATHS=(
-            "$HOME/programs/flutter/bin"
-            "/usr/local/share/flutter/bin"
-            "$HOME/flutter/bin"
-          )
-          FOUND=false
-          for p in "${FLUTTER_PATHS[@]}"; do
-            if [ -f "$p/flutter" ]; then
-              export PATH="$p:$PATH"
-              FOUND=true
-              break
-            fi
-          done
-          if [ "$FOUND" = false ]; then
-            echo "Downloading Flutter..."
-            git clone --depth 1 -b stable https://github.com/flutter/flutter.git "$HOME/flutter"
-            export PATH="$HOME/flutter/bin:$PATH"
+          FLUTTER_VERSION="3.44.3"
+          FLUTTER_DIR="$HOME/flutter-$FLUTTER_VERSION"
+
+          if [ ! -d "$FLUTTER_DIR" ]; then
+            echo "Downloading Flutter $FLUTTER_VERSION..."
+            git clone --depth 1 -b "$FLUTTER_VERSION" \
+              https://github.com/flutter/flutter.git "$FLUTTER_DIR"
           fi
 
+          export PATH="$FLUTTER_DIR/bin:$PATH"
           flutter --version
           flutter pub get
           flutter build ios --debug --no-codesign
