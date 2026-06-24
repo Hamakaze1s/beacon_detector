@@ -21,19 +21,27 @@ workflows:
           flutter --version
           flutter pub get
 
-          # Explicit pod install to ensure sandbox is in sync
+          # Let flutter generate iOS project files, then use xcodebuild directly
+          flutter precache --ios
           cd ios
-          rm -rf Pods Podfile.lock
           pod install
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Debug \
+            -sdk iphoneos \
+            -derivedDataPath ../build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
           cd ..
-
-          flutter build ios --debug --no-codesign
       - name: Package IPA
         script: |
-          cd build/ios/iphoneos
+          APP_PATH=$(find build/ios -name "Runner.app" -type d | head -1)
+          echo "Found app at: $APP_PATH"
           mkdir -p Payload
-          cp -r Runner.app Payload/
+          cp -r "$APP_PATH" Payload/
           zip -qr UnsignedApp.ipa Payload
           echo "IPA created: $(pwd)/UnsignedApp.ipa ($(wc -c < UnsignedApp.ipa) bytes)"
     artifacts:
-      - build/ios/iphoneos/UnsignedApp.ipa
+      - UnsignedApp.ipa
