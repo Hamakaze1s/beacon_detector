@@ -20,6 +20,13 @@ workflows:
           export PATH="$FLUTTER_DIR/bin:$PATH"
           flutter --version
           flutter pub get
+
+          # Explicit pod install to ensure sandbox is in sync
+          cd ios
+          rm -rf Pods Podfile.lock
+          pod install
+          cd ..
+
           flutter build ios --debug --no-codesign
       - name: Package IPA
         script: |
