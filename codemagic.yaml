@@ -8,6 +8,8 @@ workflows:
     scripts:
       - name: Setup Flutter and build
         script: |
+          set -e
+
           FLUTTER_VERSION="3.44.3"
           FLUTTER_DIR="$HOME/flutter-$FLUTTER_VERSION"
 
@@ -20,11 +22,12 @@ workflows:
           export PATH="$FLUTTER_DIR/bin:$PATH"
           flutter --version
           flutter pub get
-
-          # Let flutter generate iOS project files, then use xcodebuild directly
           flutter precache --ios
+
           cd ios
           pod install
+
+          echo "=== xcodebuild ==="
           xcodebuild \
             -workspace Runner.xcworkspace \
             -scheme Runner \
@@ -34,11 +37,22 @@ workflows:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
+
+          echo "=== Build output tree ==="
+          find build/ios -type d -name "*.app" || echo "No .app found"
+
           cd ..
       - name: Package IPA
         script: |
+          set -e
           APP_PATH=$(find build/ios -name "Runner.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: Runner.app not found!"
+            find build/ios -type f | head -30
+            exit 1
+          fi
           echo "Found app at: $APP_PATH"
+          ls -la "$APP_PATH" | head -20
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -qr UnsignedApp.ipa Payload
