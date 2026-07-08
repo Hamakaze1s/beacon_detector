@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../models/beacon_data.dart';
 import '../services/beacon_scanner.dart';
+import '../services/notification_service.dart';
 import '../utils/permission_helper.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -16,17 +17,26 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const _targetExitGrace = Duration(seconds: 15);
+  static const _notificationCooldown = Duration(seconds: 30);
+
   final BeaconScanner _scanner = BeaconScanner();
+  final NotificationService _notifications = NotificationService();
   final List<BeaconData> _beacons = [];
 
   BlePermissionState _blePermission = BlePermissionState.denied;
+  PermissionStatus _notificationPermission = PermissionStatus.denied;
   bool _isScanning = false;
   bool _isBluetoothOn = true;
+  bool _targetInRange = false;
+  DateTime? _lastTargetSeen;
+  DateTime? _lastNotificationAt;
   String? _errorMessage;
 
   StreamSubscription<List<BeaconData>>? _beaconSub;
   StreamSubscription<bool>? _scanningSub;
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
+  Timer? _targetExitTimer;
 
   @override
   void initState() {
@@ -35,6 +45,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _init() async {
+    try {
+      await _notifications.initialize();
+    } catch (e) {
+      debugPrint('[HomeScreen] Notification initialization failed: $e');
+    }
+
     await _checkPermissionStatus();
 
     _adapterSub = FlutterBluePlus.adapterState.listen((state) {
@@ -47,17 +63,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _checkPermissionStatus() async {
     final hasBle = await PermissionHelper.hasBlePermission();
+    final notificationStatus = await Permission.notification.status;
     if (!mounted) return;
     setState(() {
-      _blePermission = hasBle ? BlePermissionState.granted : BlePermissionState.denied;
+      _blePermission = hasBle
+          ? BlePermissionState.granted
+          : BlePermissionState.denied;
+      _notificationPermission = notificationStatus;
     });
   }
 
   Future<void> _requestPermissions() async {
-    final result = await PermissionHelper.requestBleAndNotificationPermissions();
+    final result =
+        await PermissionHelper.requestBleAndNotificationPermissions();
     if (!mounted) return;
     setState(() {
       _blePermission = result.ble;
+      _notificationPermission = result.notification;
     });
 
     if (result.ble == BlePermissionState.permanentlyDenied) {
@@ -94,8 +116,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _toggleScan() async {
     if (_isScanning) {
       await _scanner.stopScan();
+      if (!mounted) return;
+
       _beaconSub?.cancel();
       _beaconSub = null;
+      _scanningSub?.cancel();
+      _scanningSub = null;
+      _targetExitTimer?.cancel();
+      _targetInRange = false;
       setState(() => _isScanning = false);
       return;
     }
@@ -103,22 +131,101 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _errorMessage = null);
 
     try {
-      await _scanner.startScan();
-
+      await _beaconSub?.cancel();
       _beaconSub = _scanner.beacons.listen((list) {
         if (!mounted) return;
-        setState(() => _beacons..clear()..addAll(list));
+        _handleBeaconUpdate(list);
       });
 
+      await _scanningSub?.cancel();
       _scanningSub = _scanner.isScanningStream.listen((scanning) {
         if (!mounted) return;
         setState(() => _isScanning = scanning);
       });
 
-      setState(() => _isScanning = true);
+      await _scanner.startScan();
     } catch (e) {
+      await _beaconSub?.cancel();
+      await _scanningSub?.cancel();
+      _beaconSub = null;
+      _scanningSub = null;
+      if (!mounted) return;
       setState(() => _errorMessage = e.toString());
     }
+  }
+
+  void _handleBeaconUpdate(List<BeaconData> list) {
+    final target = _latestTargetBeacon(list);
+
+    setState(() {
+      _beacons
+        ..clear()
+        ..addAll(list);
+    });
+
+    if (target != null) {
+      _handleTargetSeen(target);
+    }
+  }
+
+  BeaconData? _latestTargetBeacon(List<BeaconData> list) {
+    BeaconData? latest;
+    final now = DateTime.now();
+    for (final beacon in list) {
+      if (!BeaconScanner.isTargetBeacon(beacon)) continue;
+      if (now.difference(beacon.lastSeen) > _targetExitGrace) continue;
+      if (latest == null || beacon.lastSeen.isAfter(latest.lastSeen)) {
+        latest = beacon;
+      }
+    }
+    return latest;
+  }
+
+  void _handleTargetSeen(BeaconData beacon) {
+    final now = DateTime.now();
+    final canNotify =
+        !_targetInRange &&
+        (_lastNotificationAt == null ||
+            now.difference(_lastNotificationAt!) >= _notificationCooldown);
+
+    setState(() {
+      _lastTargetSeen = beacon.lastSeen;
+      _targetInRange = true;
+      if (canNotify) {
+        _lastNotificationAt = now;
+      }
+    });
+    _scheduleTargetExitCheck();
+
+    if (!canNotify) {
+      return;
+    }
+
+    _notifications.showBeaconDetectedNotification(beacon).catchError((
+      Object e,
+    ) {
+      debugPrint('[HomeScreen] Failed to show beacon notification: $e');
+      if (!mounted) return;
+      setState(() => _errorMessage = 'Notification failed: $e');
+    });
+  }
+
+  void _scheduleTargetExitCheck() {
+    _targetExitTimer?.cancel();
+    _targetExitTimer = Timer(_targetExitGrace, () {
+      final lastSeen = _lastTargetSeen;
+      if (lastSeen == null || !mounted) return;
+
+      final isStillFresh =
+          DateTime.now().difference(lastSeen) < _targetExitGrace;
+      if (isStillFresh) {
+        _scheduleTargetExitCheck();
+        return;
+      }
+
+      setState(() => _targetInRange = false);
+      debugPrint('[HomeScreen] Target beacon left range');
+    });
   }
 
   @override
@@ -127,6 +234,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _beaconSub?.cancel();
     _scanningSub?.cancel();
     _adapterSub?.cancel();
+    _targetExitTimer?.cancel();
     super.dispose();
   }
 
@@ -171,8 +279,8 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: _blePermission == BlePermissionState.granted
               ? Icons.check_circle
               : _blePermission == BlePermissionState.permanentlyDenied
-                  ? Icons.error
-                  : Icons.warning,
+              ? Icons.error
+              : Icons.warning,
           label: 'BLE Permission',
           value: _blePermission.name,
           color: _blePermission == BlePermissionState.granted
@@ -181,10 +289,30 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 4),
         _statusRow(
-          icon: _isBluetoothOn ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
+          icon: _notificationPermission.isGranted
+              ? Icons.notifications_active
+              : Icons.notifications_off,
+          label: 'Notifications',
+          value: _notificationPermission.name,
+          color: _notificationPermission.isGranted
+              ? Colors.green
+              : Colors.orange,
+        ),
+        const SizedBox(height: 4),
+        _statusRow(
+          icon: _isBluetoothOn
+              ? Icons.bluetooth_connected
+              : Icons.bluetooth_disabled,
           label: 'Bluetooth',
           value: _isBluetoothOn ? 'On' : 'Off',
           color: _isBluetoothOn ? Colors.blue : Colors.red,
+        ),
+        const SizedBox(height: 4),
+        _statusRow(
+          icon: _targetInRange ? Icons.place : Icons.place_outlined,
+          label: 'Target Beacon',
+          value: _targetStatusText(),
+          color: _targetInRange ? Colors.green : Colors.grey,
         ),
         const SizedBox(height: 4),
         _statusRow(
@@ -214,9 +342,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildActionRow() {
+    final needsPermissions =
+        _blePermission != BlePermissionState.granted ||
+        !_notificationPermission.isGranted;
+
     return Row(
       children: [
-        if (_blePermission != BlePermissionState.granted)
+        if (needsPermissions)
           Expanded(
             child: FilledButton.tonalIcon(
               onPressed: _requestPermissions,
@@ -232,7 +364,7 @@ class _HomeScreenState extends State<HomeScreen> {
               label: Text(_isScanning ? 'Stop Scan' : 'Start Scan'),
             ),
           ),
-        if (_blePermission == BlePermissionState.granted) ...[
+        if (!needsPermissions) ...[
           const SizedBox(width: 8),
           IconButton(
             onPressed: () => _scanner.clear(),
@@ -252,9 +384,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ? 'Scanning... No beacons found yet.\nEnsure the emitter is nearby.'
               : 'Press "Start Scan" to discover iBeacons.',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Colors.grey,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyLarge?.copyWith(color: Colors.grey),
         ),
       );
     }
@@ -270,11 +402,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _beaconTile(BeaconData beacon) {
-    final distance = _estimateDistance(beacon.rssi, beacon.measuredPower ?? -58);
+    final distance = _estimateDistance(
+      beacon.rssi,
+      beacon.measuredPower ?? -58,
+    );
     return ListTile(
-      leading: CircleAvatar(
-        child: Text('${beacon.major}.${beacon.minor}'),
-      ),
+      leading: CircleAvatar(child: Text('${beacon.major}.${beacon.minor}')),
       title: Text(
         beacon.deviceName ?? 'iBeacon',
         style: const TextStyle(fontWeight: FontWeight.w600),
@@ -306,5 +439,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     return '${diff.inHours}h ago';
+  }
+
+  String _targetStatusText() {
+    if (_targetInRange) return 'In range';
+    if (_lastTargetSeen == null) return 'Not seen';
+    return 'Last ${_formatTimeAgo(_lastTargetSeen!)}';
   }
 }

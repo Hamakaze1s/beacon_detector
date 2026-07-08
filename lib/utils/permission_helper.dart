@@ -2,11 +2,7 @@ import 'dart:io';
 
 import 'package:permission_handler/permission_handler.dart';
 
-enum BlePermissionState {
-  granted,
-  denied,
-  permanentlyDenied,
-}
+enum BlePermissionState { granted, denied, permanentlyDenied }
 
 class PermissionResult {
   final BlePermissionState ble;
@@ -15,8 +11,7 @@ class PermissionResult {
   const PermissionResult({required this.ble, required this.notification});
 
   bool get isGranted =>
-      ble == BlePermissionState.granted &&
-      notification.isGranted;
+      ble == BlePermissionState.granted && notification.isGranted;
 }
 
 class PermissionHelper {
@@ -37,7 +32,9 @@ class PermissionHelper {
       final scanResult = await _requestPermission(Permission.bluetoothScan);
       if (scanResult != BlePermissionState.granted) return scanResult;
 
-      final locationResult = await _requestPermission(Permission.locationWhenInUse);
+      final locationResult = await _requestPermission(
+        Permission.locationWhenInUse,
+      );
       return locationResult;
     }
 
@@ -48,12 +45,16 @@ class PermissionHelper {
     return BlePermissionState.granted;
   }
 
-  static Future<BlePermissionState> _requestPermission(Permission permission) async {
+  static Future<BlePermissionState> _requestPermission(
+    Permission permission,
+  ) async {
     try {
       if (await permission.isGranted) return BlePermissionState.granted;
       final status = await permission.request();
       if (status.isGranted) return BlePermissionState.granted;
-      if (status.isPermanentlyDenied) return BlePermissionState.permanentlyDenied;
+      if (status.isPermanentlyDenied) {
+        return BlePermissionState.permanentlyDenied;
+      }
       return BlePermissionState.denied;
     } catch (_) {
       // Permission not supported on this platform/version
@@ -74,8 +75,9 @@ class PermissionHelper {
 
   static Future<bool> hasBlePermission() async {
     if (Platform.isAndroid) {
-      return await Permission.bluetoothScan.isGranted ||
-             await Permission.locationWhenInUse.isGranted;
+      final hasBluetoothScan = await Permission.bluetoothScan.isGranted;
+      final hasFineLocation = await Permission.locationWhenInUse.isGranted;
+      return hasBluetoothScan && hasFineLocation;
     }
     if (Platform.isIOS) {
       return await Permission.locationWhenInUse.isGranted;

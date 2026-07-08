@@ -35,6 +35,14 @@ Development log and key discoveries for beacon_detector.
 - **Impact:** Hard-coding `0x004C` as the key in `manufacturerData[76]` would never match the M5Beacon. nRF Connect detects it because it shows all manufacturer data regardless of ID.
 - **Resolution:** Detector iterates ALL manufacturer data entries and matches on iBeacon prefix (`02 15`) rather than hard-coding a manufacturer ID. Emitter should ideally use `setManufacturerId(0x004C)`.
 
+### D4: Current M5Beacon advertises UUID bytes in reverse order
+
+- **Date:** 2026-07-08
+- **Finding:** Pixel 7 (Android 16 / API 36) scan logs show the M5Beacon payload UUID bytes as `e0 96 10 a7 f5 d0 60 b0 d2 48 fb df b5 6d c5 e2`, which parses to `e09610a7-f5d0-60b0-d248-fbdfb56dc5e2`.
+- **Expected:** Project docs list `e2c56db5-dffb-48d2-b060-d0f5a71096e0`. The advertised bytes are the full byte-reversed form of that UUID.
+- **Impact:** Target matching against only the documented UUID leaves the detected M5Beacon visible in the list, but `Target Beacon` remains `Not seen` and no notification is sent.
+- **Resolution:** Detector temporarily accepts both the documented UUID and the currently advertised reversed UUID for target matching. The emitter firmware should be investigated so it advertises the canonical UUID byte order.
+
 ## Tested Configurations
 
 ### Working (Pixel 7, Android 14)
