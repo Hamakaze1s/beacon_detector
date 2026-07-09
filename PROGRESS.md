@@ -8,7 +8,7 @@ Development log and key discoveries for beacon_detector.
 |-------|-------------|--------|
 | Phase 1 | Dependencies & Permissions | Done |
 | Phase 2 | Foreground BLE Scanner + iBeacon Detection | Done |
-| Phase 3 | Background Foreground Service + Notifications | Pending |
+| Phase 3 | Background Foreground Service + Notifications | In Progress |
 | Phase 4 | iOS Adaptation | Pending |
 
 ## Key Discoveries
@@ -42,6 +42,14 @@ Development log and key discoveries for beacon_detector.
 - **Expected:** Project docs list `e2c56db5-dffb-48d2-b060-d0f5a71096e0`. The advertised bytes are the full byte-reversed form of that UUID.
 - **Impact:** Target matching against only the documented UUID leaves the detected M5Beacon visible in the list, but `Target Beacon` remains `Not seen` and no notification is sent.
 - **Resolution:** Detector temporarily accepts both the documented UUID and the currently advertised reversed UUID for target matching. The emitter firmware should be investigated so it advertises the canonical UUID byte order.
+
+### D5: Android native foreground service prototype added
+
+- **Date:** 2026-07-08
+- **Scope:** Added an Android-only `ForegroundService` path for background BLE scanning, controlled from Flutter via a `MethodChannel`.
+- **Design:** The native service owns its BLE scan, persistent scan-status notification, target iBeacon matching, enter/exit state, and detection notification. The existing Dart foreground scanner remains available for comparison.
+- **Diagnostics:** Background scan logs are intentionally event-focused: target enter, low-frequency target-visible heartbeat, target exit, and notification shown. Per-advertisement logging is suppressed so lock-screen timing can be inspected from `logcat`.
+- **Verification:** `flutter analyze`, `flutter test`, and `flutter build apk --debug` pass. Pixel 7 (Android 16 / API 36) confirms the foreground service remains active after switching to the launcher, keeps detecting the target beacon, and posts the detection notification. Lock-screen behavior is still pending.
 
 ## Tested Configurations
 

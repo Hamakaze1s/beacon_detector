@@ -10,6 +10,7 @@
 
     <!-- Foreground service for background BLE scanning -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
@@ -34,6 +35,10 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <service
+            android:name=".BeaconScanService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

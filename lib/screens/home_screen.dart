@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/beacon_data.dart';
+import '../services/background_beacon_service.dart';
 import '../services/beacon_scanner.dart';
 import '../services/notification_service.dart';
 import '../utils/permission_helper.dart';
@@ -21,12 +22,14 @@ class _HomeScreenState extends State<HomeScreen> {
   static const _notificationCooldown = Duration(seconds: 30);
 
   final BeaconScanner _scanner = BeaconScanner();
+  final BackgroundBeaconService _backgroundService = BackgroundBeaconService();
   final NotificationService _notifications = NotificationService();
   final List<BeaconData> _beacons = [];
 
   BlePermissionState _blePermission = BlePermissionState.denied;
   PermissionStatus _notificationPermission = PermissionStatus.denied;
   bool _isScanning = false;
+  bool _isBackgroundScanning = false;
   bool _isBluetoothOn = true;
   bool _targetInRange = false;
   DateTime? _lastTargetSeen;
@@ -52,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     await _checkPermissionStatus();
+    await _refreshBackgroundScanState();
 
     _adapterSub = FlutterBluePlus.adapterState.listen((state) {
       if (!mounted) return;
@@ -59,6 +63,16 @@ class _HomeScreenState extends State<HomeScreen> {
         _isBluetoothOn = state == BluetoothAdapterState.on;
       });
     });
+  }
+
+  Future<void> _refreshBackgroundScanState() async {
+    try {
+      final running = await _backgroundService.isRunning();
+      if (!mounted) return;
+      setState(() => _isBackgroundScanning = running);
+    } catch (e) {
+      debugPrint('[HomeScreen] Background service state check failed: $e');
+    }
   }
 
   Future<void> _checkPermissionStatus() async {
@@ -149,6 +163,39 @@ class _HomeScreenState extends State<HomeScreen> {
       await _scanningSub?.cancel();
       _beaconSub = null;
       _scanningSub = null;
+      if (!mounted) return;
+      setState(() => _errorMessage = e.toString());
+    }
+  }
+
+  Future<void> _toggleBackgroundScan() async {
+    setState(() => _errorMessage = null);
+
+    try {
+      if (_isBackgroundScanning) {
+        await _backgroundService.stop();
+        if (!mounted) return;
+        setState(() => _isBackgroundScanning = false);
+        return;
+      }
+
+      if (_isScanning) {
+        await _scanner.stopScan();
+        await _beaconSub?.cancel();
+        await _scanningSub?.cancel();
+        _beaconSub = null;
+        _scanningSub = null;
+        _targetExitTimer?.cancel();
+        _targetInRange = false;
+      }
+
+      await _backgroundService.start();
+      if (!mounted) return;
+      setState(() {
+        _isScanning = false;
+        _isBackgroundScanning = true;
+      });
+    } catch (e) {
       if (!mounted) return;
       setState(() => _errorMessage = e.toString());
     }
@@ -248,7 +295,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             _buildStatusCards(),
             const SizedBox(height: 12),
-            _buildActionRow(),
+            _buildActionArea(),
             if (_errorMessage != null) ...[
               const SizedBox(height: 8),
               Card(
@@ -321,6 +368,13 @@ class _HomeScreenState extends State<HomeScreen> {
           value: _isScanning ? 'Active' : 'Idle',
           color: _isScanning ? Colors.green : Colors.grey,
         ),
+        const SizedBox(height: 4),
+        _statusRow(
+          icon: _isBackgroundScanning ? Icons.sensors : Icons.sensors_off,
+          label: 'Background Scan',
+          value: _isBackgroundScanning ? 'Active' : 'Idle',
+          color: _isBackgroundScanning ? Colors.green : Colors.grey,
+        ),
       ],
     );
   }
@@ -341,37 +395,61 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildActionRow() {
+  Widget _buildActionArea() {
     final needsPermissions =
         _blePermission != BlePermissionState.granted ||
         !_notificationPermission.isGranted;
 
-    return Row(
-      children: [
-        if (needsPermissions)
+    if (needsPermissions) {
+      return Row(
+        children: [
           Expanded(
             child: FilledButton.tonalIcon(
               onPressed: _requestPermissions,
               icon: const Icon(Icons.security),
               label: const Text('Grant Permissions'),
             ),
-          )
-        else
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: _toggleScan,
-              icon: Icon(_isScanning ? Icons.stop : Icons.play_arrow),
-              label: Text(_isScanning ? 'Stop Scan' : 'Start Scan'),
-            ),
-          ),
-        if (!needsPermissions) ...[
-          const SizedBox(width: 8),
-          IconButton(
-            onPressed: () => _scanner.clear(),
-            icon: const Icon(Icons.clear_all),
-            tooltip: 'Clear list',
           ),
         ],
+      );
+    }
+
+    return Column(
+      children: [
+        _buildForegroundActionRow(),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.tonalIcon(
+            onPressed: _toggleBackgroundScan,
+            icon: Icon(_isBackgroundScanning ? Icons.stop : Icons.sensors),
+            label: Text(
+              _isBackgroundScanning
+                  ? 'Stop Background Scan'
+                  : 'Start Background Scan',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildForegroundActionRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: FilledButton.icon(
+            onPressed: _toggleScan,
+            icon: Icon(_isScanning ? Icons.stop : Icons.play_arrow),
+            label: Text(_isScanning ? 'Stop Scan' : 'Start Scan'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          onPressed: () => _scanner.clear(),
+          icon: const Icon(Icons.clear_all),
+          tooltip: 'Clear list',
+        ),
       ],
     );
   }
