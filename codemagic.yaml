@@ -50,7 +50,7 @@ workflows:
     integrations:
       # Name of the Apple Developer Portal / App Store Connect integration
       # created under Codemagic > Team settings > Integrations. Must match exactly.
-      app_store_connect: Codemagic
+      app_store_connect: Codemagic-Admin
     environment:
       vars:
         BUNDLE_ID: "com.nict.beacondetector"
