@@ -94,7 +94,9 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
-        beta_groups:
-          # TODO: must match an Internal Testing group name you create under
-          # App Store Connect > your app > TestFlight > Internal Testing.
-          - "Internal Testers"
+        # No beta_groups here on purpose: explicitly assigning a build to an
+        # internal group via the API fails ("Cannot add internal group to a
+        # build") when that group has "Automatically distribute builds"
+        # enabled - which is the default for a new Internal Testing group.
+        # Leave that toggle ON in App Store Connect > TestFlight > Internal
+        # Testing, and every processed build reaches testers on its own.
