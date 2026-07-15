@@ -42,3 +42,45 @@ workflows:
           echo "IPA created: $(pwd)/UnsignedApp.ipa ($(du -h UnsignedApp.ipa | cut -f1))"
     artifacts:
       - UnsignedApp.ipa
+
+  ios-testflight:
+    name: iOS TestFlight Release
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    integrations:
+      # Name of the Apple Developer Portal / App Store Connect integration
+      # created under Codemagic > Team settings > Integrations. Must match exactly.
+      app_store_connect: Codemagic
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.nict.beacondetector
+      flutter: 3.44.3
+      xcode: latest
+    scripts:
+      - name: Set up code signing settings on Xcode project
+        script: |
+          xcode-project use-profiles
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+      - name: Flutter build ipa for TestFlight
+        script: |
+          set -e
+          # Build number comes from pubspec.yaml's version (0.1.0+1 -> build number 1).
+          # Bump the number after "+" in pubspec.yaml before each new TestFlight upload -
+          # Apple rejects a build number that isn't strictly higher than the last one
+          # submitted for this bundle ID.
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_groups:
+          # TODO: must match an Internal Testing group name you create under
+          # App Store Connect > your app > TestFlight > Internal Testing.
+          - "Internal Testers"
