@@ -52,6 +52,13 @@ workflows:
       # created under Codemagic > Team settings > Integrations. Must match exactly.
       app_store_connect: Codemagic-Admin
     environment:
+      groups:
+        # Must contain a secret variable CERTIFICATE_PRIVATE_KEY (a PEM RSA
+        # private key) - create this group under the app's Environment
+        # variables settings in Codemagic. Used by `fetch-signing-files
+        # --create` to generate the CSR for a brand new distribution
+        # certificate when none exists yet.
+        - appstore_credentials
       vars:
         BUNDLE_ID: "com.nict.beacondetector"
       flutter: 3.44.3
