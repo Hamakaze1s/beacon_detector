@@ -98,13 +98,14 @@ class BeaconScanner {
   // cannot detect anything here. CoreLocation region ranging is the only
   // API Apple exposes for reading an iBeacon's UUID/major/minor.
   Future<void> _startIosRanging() async {
+    // dchs_flutter_beacon 0.6.10 has a bug: on the success path, the native
+    // iOS side resolves with `nil` (no error), but the plugin's own bool
+    // parser treats a non-bool/non-int result as `false`. So this call
+    // *always* reports failure even when everything is fine. Await it only
+    // for its side effect (it drives the location/bluetooth permission
+    // flow) - do not gate startup on its return value.
     final ready = await ios_beacon.flutterBeacon.initializeAndCheckScanning;
-    if (!ready) {
-      throw Exception(
-        'Beacon ranging not available (check Location Services, '
-        'Bluetooth, and Always-location permission)',
-      );
-    }
+    debugPrint('[BeaconScanner] iOS initializeAndCheckScanning -> $ready');
 
     final regions = <ios_beacon.Region>[
       ios_beacon.Region(identifier: 'target-standard', proximityUUID: targetUuid),
