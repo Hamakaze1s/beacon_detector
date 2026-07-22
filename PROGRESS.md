@@ -9,7 +9,7 @@ Development log and key discoveries for beacon_detector.
 | Phase 1 | Dependencies & Permissions | Done |
 | Phase 2 | Foreground BLE Scanner + iBeacon Detection | Done |
 | Phase 3 | Background Foreground Service + Notifications | In Progress |
-| Phase 4 | iOS Adaptation | Pending |
+| Phase 4 | iOS Adaptation | In Progress |
 
 ## Key Discoveries
 
@@ -50,6 +50,42 @@ Development log and key discoveries for beacon_detector.
 - **Design:** The native service owns its BLE scan, persistent scan-status notification, target iBeacon matching, enter/exit state, and detection notification. The existing Dart foreground scanner remains available for comparison.
 - **Diagnostics:** Background scan logs are intentionally event-focused: target enter, low-frequency target-visible heartbeat, target exit, and notification shown. Per-advertisement logging is suppressed so lock-screen timing can be inspected from `logcat`.
 - **Verification:** `flutter analyze`, `flutter test`, and `flutter build apk --debug` pass. Pixel 7 (Android 16 / API 36) confirms the foreground service remains active after switching to the launcher, keeps detecting the target beacon, and posts the detection notification. Lock-screen behavior is still pending.
+
+### D6: iOS CoreBluetooth hides iBeacon manufacturer data - CoreLocation required
+
+- **Date:** 2026-07-22
+- **Finding:** Apple's CoreBluetooth deliberately masks the iBeacon-formatted manufacturer data (Apple company ID `0x004C`, subtype `0x02 0x15`) from third-party apps. The raw-advertisement scanning in `BeaconScanner` (via `flutter_blue_plus`) that works on Android cannot read UUID/major/minor on iOS - it detects nothing, foreground or background, no matter the permissions granted.
+- **Impact:** iOS requires a fundamentally different detection mechanism from Android; there is no cross-platform BLE-scanning code path.
+- **Resolution:** `BeaconScanner` now branches on `Platform.isIOS`. Android keeps the existing `flutter_blue_plus` raw scan unchanged. iOS uses the `dchs_flutter_beacon` package (Apache-2.0, actively maintained) as a thin wrapper around `CLLocationManager`/`CLBeaconRegion` ranging. Both paths feed the same `BeaconData` model and `isTargetBeacon()` matching.
+- **Side benefit:** CoreLocation region monitoring is designed by Apple to wake the app in the background/killed state on its own, unlike Android which needs a manual foreground service (D5). iOS's "Start Background Scan" story may end up simpler than Android's once implemented.
+- **Required iOS permission change:** "Always" location authorization (not "When In Use") plus the `location` `UIBackgroundModes` entry are required for background detection; `Info.plist` and `permission_helper.dart` were updated accordingly.
+
+### D7: Codemagic iOS automatic signing needs an Admin-role API key + a supplied private key
+
+- **Date:** 2026-07-22
+- **Finding:** On a brand-new Apple Developer account with zero existing certificates, the declarative `ios_signing` block in `codemagic.yaml` only *fetches* existing certificates/profiles - it does not create them. Switching to an explicit `app-store-connect fetch-signing-files --create` script step is required to generate a new Apple Distribution certificate + App Store provisioning profile.
+- **Further finding:** Creating certificates via the App Store Connect API requires the API key to have the **Admin** role - the "App Manager" role Codemagic's own docs recommend for general use is not sufficient and fails with "No matching profiles found for bundle identifier ... and distribution type app_store".
+- **Further finding:** Even with an Admin-role key, `--create` still fails ("Cannot save Signing Certificates without certificate private key") unless a `CERTIFICATE_PRIVATE_KEY` secret env var (a PEM RSA private key) is supplied - Codemagic needs it to build the CSR itself.
+- **Resolution:** Generate an RSA private key, store it as a secure Codemagic env var `CERTIFICATE_PRIVATE_KEY` in the `appstore_credentials` group, and use an Admin-role App Store Connect API key integration. See `codemagic.yaml`'s `ios-testflight` workflow.
+
+### D8: TestFlight Internal Testing group rejects explicit build assignment when automatic distribution is on
+
+- **Date:** 2026-07-22
+- **Finding:** A newly created Internal Testing group defaults to "Automatically distribute builds" enabled. With that setting on, Codemagic's `publishing.app_store_connect.beta_groups` explicitly assigning the upload to that group fails: "Failed to add a build to '...' beta group. Builds cannot be assigned to this internal group. - Cannot add internal group to a build."
+- **Resolution:** Drop `beta_groups` from `codemagic.yaml` entirely and rely on the group's own automatic distribution instead of an explicit API assignment. Keep `submit_to_testflight: true`.
+
+### D9: App Store Connect rejects re-uploading the same (version, build number)
+
+- **Date:** 2026-07-22
+- **Finding:** Uploading a build fails with "The provided entity includes an attribute with a value that has already been used" if `pubspec.yaml`'s `version: X.Y.Z+N` build number `N` was already used for a prior successful upload of this bundle ID.
+- **Resolution:** Bump the number after `+` in `pubspec.yaml` before every new TestFlight upload.
+
+### D10: Kotlin incremental compiler crashes on Windows when project and pub cache are on different drives
+
+- **Date:** 2026-07-22
+- **Finding:** Once a plugin ships real Kotlin sources for Android (`dchs_flutter_beacon`, added for D6), `flutter build apk` fails during `compileDebugKotlin` on this Windows dev machine: `RelocatableFileToPathConverter`/`relativeTo()` can't compute a relative path between `D:\Projects\beacon_detector` (project) and `C:\Users\...\Pub\Cache\...` (pub cache) since they're on different drive letters.
+- **Impact:** Local-machine-only; Codemagic's macOS runner has no drive-letter concept and is unaffected.
+- **Resolution:** Set `kotlin.incremental=false` in `android/gradle.properties`.
 
 ## Tested Configurations
 
