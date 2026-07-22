@@ -87,6 +87,13 @@ Development log and key discoveries for beacon_detector.
 - **Impact:** Local-machine-only; Codemagic's macOS runner has no drive-letter concept and is unaffected.
 - **Resolution:** Set `kotlin.incremental=false` in `android/gradle.properties`.
 
+### D11: `dchs_flutter_beacon`'s `initializeAndCheckScanning` always reports failure on iOS
+
+- **Date:** 2026-07-22
+- **Finding:** On the success path (Location Services on, Bluetooth on, "Always" location authorized), the native iOS side resolves the method call with `nil` instead of an explicit `true`/`1`. The plugin's own Dart-side `_parseBoolResult` treats anything that isn't a `bool` or `int` as `false`, so `initializeAndCheckScanning` returns `false` unconditionally on the success path too - not just on real failures.
+- **Symptom:** Tapping "Start Scan" on iOS always threw "Beacon ranging not available (check Location Services, Bluetooth, and Always-location permission)" even after granting Always location permission.
+- **Resolution:** `BeaconScanner._startIosRanging()` awaits `initializeAndCheckScanning` only for its side effect (it drives the permission/init flow) and no longer gates startup on its return value.
+
 ## Tested Configurations
 
 ### Working (Pixel 7, Android 14)
