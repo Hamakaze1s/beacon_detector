@@ -39,7 +39,9 @@ class PermissionHelper {
     }
 
     if (Platform.isIOS) {
-      return _requestPermission(Permission.locationWhenInUse);
+      // "Always" (not "When In Use") is required for CoreLocation region
+      // monitoring to keep detecting the beacon while backgrounded/killed.
+      return _requestPermission(Permission.locationAlways);
     }
 
     return BlePermissionState.granted;
@@ -80,7 +82,7 @@ class PermissionHelper {
       return hasBluetoothScan && hasFineLocation;
     }
     if (Platform.isIOS) {
-      return await Permission.locationWhenInUse.isGranted;
+      return await Permission.locationAlways.isGranted;
     }
     return true;
   }

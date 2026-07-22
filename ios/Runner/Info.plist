@@ -32,6 +32,8 @@
 	<string>This app uses Bluetooth to detect nearby iBeacons.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location access is required for BLE beacon scanning on iOS.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Always location access is required so the app can keep detecting the beacon while in the background.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -75,6 +77,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
+		<string>location</string>
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>

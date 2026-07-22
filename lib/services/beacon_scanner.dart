@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:dchs_flutter_beacon/dchs_flutter_beacon.dart' as ios_beacon;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
@@ -23,7 +25,8 @@ class BeaconScanner {
   Stream<bool> get isScanningStream => _isScanningController.stream;
 
   final Map<String, BeaconData> _detectedBeacons = {};
-  StreamSubscription<List<ScanResult>>? _scanSubscription;
+  StreamSubscription<List<ScanResult>>? _androidScanSubscription;
+  StreamSubscription<ios_beacon.RangingResult>? _iosRangingSubscription;
   bool _isScanning = false;
 
   bool get isScanning => _isScanning;
@@ -38,23 +41,11 @@ class BeaconScanner {
   Future<void> startScan() async {
     if (_isScanning) return;
 
-    final supported = await FlutterBluePlus.isSupported;
-    if (!supported) {
-      throw Exception('Bluetooth not supported on this device');
+    if (Platform.isIOS) {
+      await _startIosRanging();
+    } else {
+      await _startAndroidScan();
     }
-
-    final adapterState = await FlutterBluePlus.adapterState.first;
-    if (adapterState != BluetoothAdapterState.on) {
-      throw Exception('Bluetooth is turned off');
-    }
-
-    _scanSubscription = FlutterBluePlus.scanResults.listen(_onScanResults);
-    await FlutterBluePlus.startScan(
-      continuousUpdates: true,
-      continuousDivisor: 1,
-      androidScanMode: AndroidScanMode.lowLatency,
-      androidUsesFineLocation: true,
-    );
 
     _isScanning = true;
     _isScanningController.add(true);
@@ -65,16 +56,110 @@ class BeaconScanner {
   Future<void> stopScan() async {
     if (!_isScanning) return;
 
-    await FlutterBluePlus.stopScan();
-    await _scanSubscription?.cancel();
-    _scanSubscription = null;
+    if (Platform.isIOS) {
+      await _iosRangingSubscription?.cancel();
+      _iosRangingSubscription = null;
+    } else {
+      await FlutterBluePlus.stopScan();
+      await _androidScanSubscription?.cancel();
+      _androidScanSubscription = null;
+    }
+
     _isScanning = false;
     _isScanningController.add(false);
 
     debugPrint('[BeaconScanner] Scan stopped');
   }
 
-  void _onScanResults(List<ScanResult> results) {
+  Future<void> _startAndroidScan() async {
+    final supported = await FlutterBluePlus.isSupported;
+    if (!supported) {
+      throw Exception('Bluetooth not supported on this device');
+    }
+
+    final adapterState = await FlutterBluePlus.adapterState.first;
+    if (adapterState != BluetoothAdapterState.on) {
+      throw Exception('Bluetooth is turned off');
+    }
+
+    _androidScanSubscription = FlutterBluePlus.scanResults.listen(
+      _onAndroidScanResults,
+    );
+    await FlutterBluePlus.startScan(
+      continuousUpdates: true,
+      continuousDivisor: 1,
+      androidScanMode: AndroidScanMode.lowLatency,
+      androidUsesFineLocation: true,
+    );
+  }
+
+  // iOS's CoreBluetooth hides iBeacon-formatted manufacturer data from
+  // third-party apps, so the raw-advertisement approach used on Android
+  // cannot detect anything here. CoreLocation region ranging is the only
+  // API Apple exposes for reading an iBeacon's UUID/major/minor.
+  Future<void> _startIosRanging() async {
+    final ready = await ios_beacon.flutterBeacon.initializeAndCheckScanning;
+    if (!ready) {
+      throw Exception(
+        'Beacon ranging not available (check Location Services, '
+        'Bluetooth, and Always-location permission)',
+      );
+    }
+
+    final regions = <ios_beacon.Region>[
+      ios_beacon.Region(identifier: 'target-standard', proximityUUID: targetUuid),
+      ios_beacon.Region(
+        identifier: 'target-reversed',
+        proximityUUID: targetAdvertisedUuid,
+      ),
+    ];
+
+    _iosRangingSubscription = ios_beacon.flutterBeacon
+        .ranging(regions)
+        .listen(_onIosRangingResult);
+  }
+
+  void _onIosRangingResult(ios_beacon.RangingResult result) {
+    final now = DateTime.now();
+
+    debugPrint(
+      '[BeaconScanner] iOS ranging in region '
+      '${result.region.identifier}: ${result.beacons.length} beacon(s)',
+    );
+
+    for (final beacon in result.beacons) {
+      final uuid = beacon.proximityUUID.toLowerCase();
+
+      debugPrint(
+        '[BeaconScanner]   -> UUID=$uuid Major=${beacon.major}'
+        ' Minor=${beacon.minor} RSSI=${beacon.rssi}'
+        ' Accuracy=${beacon.accuracy}m',
+      );
+
+      final key = '${uuid}_${beacon.major}_${beacon.minor}';
+      final previous = _detectedBeacons[key];
+
+      if (previous == null) {
+        _detectedBeacons[key] = BeaconData(
+          deviceId: key,
+          deviceName: 'iBeacon',
+          uuid: uuid,
+          major: beacon.major,
+          minor: beacon.minor,
+          rssi: beacon.rssi,
+          lastSeen: now,
+        );
+      } else {
+        _detectedBeacons[key] = previous.copyWith(
+          rssi: beacon.rssi,
+          lastSeen: now,
+        );
+      }
+    }
+    _beaconsController.add(List.unmodifiable(_detectedBeacons.values));
+  }
+
+  void _onAndroidScanResults(List<ScanResult> results) {
     debugPrint('[BeaconScanner] Got ${results.length} scan result(s)');
 
     for (final result in results) {
@@ -161,7 +246,8 @@ class BeaconScanner {
   }
 
   void dispose() {
-    _scanSubscription?.cancel();
+    _androidScanSubscription?.cancel();
+    _iosRangingSubscription?.cancel();
     _beaconsController.close();
     _isScanningController.close();
   }
